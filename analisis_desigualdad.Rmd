@@ -1,0 +1,469 @@
+---
+title: "Análisis sobre desigualdad de ingresos en Chile en 1988"
+author: "Alejandro Jiménez Salazar 
+
+
+(@des_astrum)"
+date: "Agosto de 2025"
+output:
+  html_document:
+    theme: readable
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Introducción
+
+Este informe se enmarca en un proyecto de portafolio personal para la práctica de análisis e interpretación de datos usando RStudio. En este caso, se presenta un análisis sobre desigualdad usando la base de datos 'Chile' del paquete 'carData'. Esta base de datos fue consolidada por parte de la FLACSO Chile con información recolectada durante el contexto del Plebiscito Nacional respecto a la intención de voto. La recolección de estos datos se realizó mediante encuestas llevadas a cabo en los meses de abril y mayo de 1988. 
+
+En este análisis, inspirado en la guía cuantitativa sobre desigualdad presentada por Sientifiko (2023), exploro la curva de Lorenz, el coeficiente de Gini y el ratio de Palma, como herramientas complementarias para desentrañar y comprender un poco más la economía política detrás de este tema, además de la práctica para la ejecución de código y las funciones. 
+
+
+##### Carga de librerías para el manejo de los datos y funciones
+
+```{r}
+# librerías
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(janitor)
+library(forcats)
+library(tidyverse)
+library(readxl)
+library(knitr)
+library(gganimate)
+library(gifski)
+library(ineq)
+library(patchwork)
+
+# librería donde está la base de datos (CarData)
+library(carData)
+```
+
+
+#### Base de datos 'Chile'
+
+Usé la base de datos Chile del paquete CarData debido a que esta contiene tanto lo que usaremos como unidad de análisis como el recurso ligado a estas; a saber, los individuos y su ingreso mensual en pesos chilenos (CLP)
+
+```{r}
+# cargar la base de datos income del paquete CarData
+data("Chile", package = "carData")
+```
+
+
+#### Resumen estadístico del set de datos
+
+Lo siguiente es un breve despliegue del resumen estadístico de cada variable: presenta el rango, los cuartiles, la media y cuántos NA hay por columna. Para este ejercicio, utilizaré únicamente la variable del ingreso mensual ('income').
+
+```{r}
+summary(Chile)
+```
+
+
+
+
+#### Distribución del ingreso según su frecuencia
+
+Para realizar la distribución, lo más conveniente es definir los intervalos en los cuales cae cada observación, es decir, su frecuencia. Para esto, utilizaré la formula de Sturges, que nos arroja un número sugerido de intervalos o clases para ordenar la distribución. Así, la fórmula es la siguiente:
+
+k = 1 + 3.322 * log10 (n)
+
+—,donde k es el número de intervalos y n el total de observaciones.
+
+Para esto, primero filtro primero las personas que reportaron ingreso 0.0, así como los valores perdidos (NA), debido a que tanto la curva de Lorenz como el coeficiente de Gini derivado de esta en contraste con una línea de igualdad perfecta asumen ingresos positivos.
+
+
+```{r}
+# exclusión de los NA y valores cero
+datos<-Chile%>%
+  filter(!is.na(income)&income>0)
+```
+
+
+
+Ahora, para aplicar la fórmula de Sturges, podemos revisar cuántas observaciones quedaron luego de la limpieza de base de datos, particularmente de la variable de ingreso (income)
+
+```{r}
+# número de observaciones válidas para la aplicación de la fórmula y encontrar las clases
+datos%>%
+  select(income)%>%
+  nrow()
+```
+
+
+
+Tenemos un registro disponible de 2,602 datos de ingreso disponible y positivo (y>0).
+
+n = 2,602
+
+```{r}
+# obtener sturges
+n<-2602
+
+# fórmula
+k_sturges<-1+3.322*log10(n)
+print(k_sturges)
+```
+
+
+Ahora, con este resultado, lo que se podría hacer para acomodar los intervalos es aproximar o redondear hacia arriba, hasta el número entero más cercano. En este caso, serían entonces 13 intervalos o clases en las cuales se contará la frecuencia de la distribución del ingreso.
+
+```{r}
+# distribución del ingreso 
+datos%>%
+  ggplot(aes(x=income))+
+  geom_histogram(bins = 13,
+                 fill = "#5F9EA0",color="white")+
+  theme_linedraw()+
+  labs(title = "Distribución del ingreso en Chile (1988)",
+       x="Ingreso",
+       y="Frecuencia",
+       caption = "Intervalos obtenidos mediante la regla de Sturges")
+```
+
+
+
+
+Como se puede apreciar, los valores se concentran, en su gran mayoría en los primeros intervalos que delimitan los ingresos más bajos, es decir, que los ingresos bajos, correspondientes a las primeras clases cuando el ingreso se ordena de menor a mayor,  tienen más frecuencia. 
+
+Veamos ahora la estimación de la curva de densidad (Kernel) que genera la forma de esta distribución:
+
+```{r}
+datos%>%
+  ggplot(aes(x=income))+
+  geom_density(fill="#6E8B3D",alpha=0.4)+
+  theme_bw()+
+  labs(title = "Distribución del ingreso en Chile (1988)",
+       x="Ingreso",
+       y="Densidad")
+```
+
+
+
+La lógica para la lectura básica de las densidad Kernel es que si la curva está más alta a la izquierda, es porque los valores bajos son más frecuentes, lo cual es el caso para los datos específicos. De manera, correlativamente opuesta, si la curva alcanzara su altura máxima a la derecha significaría que los valores altos, en este caso, los ingresos, serían los registros que más se repiten (no es el caso). Vale de decir que, cuando la curva se encuentra alta en el centro, es porque los valores están agrupados alrededor del promedio (x̄) .
+
+
+#### Curva de Lorenz 
+
+
+```{r}
+# ordenación de la variable de ingreso de menor a mayor
+ingreso<-sort(datos$income)
+```
+
+
+Conocemos el número de observaciones (2,602). Ahora calculamos la sumatoria del ingreso para obtener el recurso total.
+
+```{r}
+# suma de la varibale de ingreso
+suma_ingreso<-sum(ingreso)
+print(suma_ingreso)
+```
+
+
+
+
+Tenemos que el recurso total es de 88'145,000 de pesos chilenos (CLP). Así, con ambos cálculos (número de observaciones y la sumatoria del ingreso), podemos construir la tabla base de valores acumulados para graficar la curva de Lorenz.
+
+Visualizaremos únicamente las primeras de diez observaciones.
+
+
+```{r}
+# tabla de proporciones acumuladas
+tabla_frecuencias<-data.frame(ingreso=ingreso,
+                              poblacion_acumulada=(1:2602)/2602,
+                              ingreso_acumulado=cumsum(ingreso)/suma_ingreso)
+
+# tabla
+tabla_frecuencias%>%
+  head(10)%>%
+  kable(col.names = c("Ingreso",
+                      "Población (prop.acum)",
+                      "Ingreso (prop.acum)"))
+```
+
+
+
+
+
+
+
+
+En tanto la curva de Lorenz para contrastar con la situación de igualdad perfecta debe partir (x,y) de la coordenada (0,0) y llegar hasta la (1,1), se debe configurar ambos vectores para que cumplan esta estructura.
+
+
+```{r}
+# inclusión de los valores de origen y llegada
+curva_lorenz<-rbind(data.frame(poblacion_acumulada=0,
+                               ingreso_acumulado=0),
+                    data.frame(poblacion_acumulada=tabla_frecuencias$poblacion_acumulada,
+                               ingreso_acumulado=tabla_frecuencias$ingreso_acumulado),
+                    data.frame(poblacion_acumulada=1,ingreso_acumulado=1))
+```
+
+
+```{r}
+# curva de lorenz
+curva_lorenz%>%
+  ggplot(aes(x=poblacion_acumulada,
+             y=ingreso_acumulado))+
+  geom_line(size = 1.1, color="red4")+
+  geom_abline(intercept=0,slope=1,linetype="dashed")+
+  labs(title = "Curva de Lorenz: relación propoción de ingresos y población",
+       x = "Población",
+       y = "Ingreso") +
+  theme_linedraw()
+```
+
+
+Esta gráfica nos permite apreciar un caso de igualdad perfecta (línea punteada o entrecortada), donde el presupuesto teórico es que una proporción de población especpifica captura o le corresponde esa misma proporción del recurso en cuestión (ingreso, tierras, etc.). La curva roja, la de Lorenz, representa la concentración de Chile respecto al ingreso para 1988. Esto nos permite observar que, por ejemplo, el 50% de la población lograba capturar menos del 25% del total del ingreso, o que el 75% de esta apenas alcanza a concentrar aproximadamente el 37.5% del recurso.
+
+
+El área que se forma entre las dos líneas, la de igual de perfecta y la Curva de Lorenz que estima la concentración del caso, se denomina área de desigualdad: entre más grande el área, más lejos está la curva de Lorenz de la situación de igualdad perfecta, por tanto hay más concentración-desigualdad; y, entre más reducida el área, ambas líneas estarían más cerca, lo cual indica menor desigualdad. La posibilidad de calcular el área mediante métodos matemáticos permite extraer uno de los índices de desigualdad más conocidos y utilizados: el coeficiente de Gini. Para esto, se computa el área formada entre las dos líneas (a) y se divide entre la suma de esta y el área total que queda debajo de la de la situación de igualdad perfecta (b):
+
+Coeficiente de Gini=a/(a+b)
+
+
+Al estar normalizado, esta medida va de 0 a 1.
+
+Si una unidad de análisis (individuo, región, hogar, etc.) concentrara todo el recurso sería porque la curva de Lorenz estaría prácticamente paralela adherida o muy cerca al eje X, por lo cual este área total debajo de la línea de igualdad perfecta tendría valor 0 (b=0). Así, Gini=a/(a+0)=1, lo cual indicaría desigualdad absoluta. En este mismo sentido, si la curva de Lorenz fuese exactamente igual a la línea de igualdad perfecta, el área entre estas ni se vería y por eso tendría valor 0, por lo tanto: Gini=0/(0+b)=0, que sería un escenario de igualdad perfecta. No obstante, y tal como es ampliamente sabido y citicado, el Gini provee una métrica pero no indica en qué segmentos poblacionales se concentran los recursos, precisamente porque es el cálculo de un área, la cual podría tener una forma diferente y dar el mismo resultado.
+
+
+
+#### Coeficiente de Gini
+
+```{r}
+### cálculo del Gini con la función del paquete 'ineq'
+coef_gini<-Gini(datos$income)
+print(coef_gini)
+```
+
+
+El relacionamiento entre ambas áreas, para este caso, nos arroja un Gini de 0.51, lo cual indica que Chile, para finales de la década de 1980, tenía una desigualdad alta. Lo que mide esto es la desviación de la distribución real respecto a la igualdad perfecta, tal como se apreció en la curva de Lorenz, mas termina por ocultar en dónde o en qué segmentos poblacionales queda capturada esa riqueza que se concentra y produce tal asimetría. Hasta este punto, no pude determinar, porque no lo dice el instructivo de la base de datos, si esta variable de ingreso trata sobre ingresos de mercado previos a gravámenes y transferencias o si son ingresos disponibles post impuestos, pagos y cesiones.
+
+En términos interpretativos, esta diferencia impoprta en tanto se podría conocer la diferencia entre el grado de concentración antes (ingreso de mercado) y después de impuestos y transferencias (ingreso disponible) y dar cuenta, cuantitativamente, de la economía política que tal desigualdad produce y viceversa, así como cuestiones como la efectivadad de esquemas de redistribución o de transferencias implícitas o directas. Precisamente para sortear este ocultamiento —presente siempre cuando se pretende tratar de abstraer y reducir la realidad a un número o concepto— complemetaré el análisis con la razón aritmética propuesta por José Gabriel Palma que segmenta la población en clases agrupadas en deciles respecto al ingreso y luego calcula cuántas veces cierta clase social contiene el ingreso de otras clases.
+
+
+#### Ratio de Palma
+
+
+Con base en la guía cuantitativa de Sintifiko (2023), y la cual sirvió de inspiración para indagar sobre este tema y realizar la práctica con los datos, las métricas anteriormente expuestas (Lorenz-Gini) debe complementarse con medidas de posición, tales como son los cuantiles. Para este caso, y poder calcular el ratio de Palma, ordenaremos los puntos de corte en deciles (10%, 20%, 30%,....n%). Es decir, agrupar por límite de ingreso y proporción, por ejemplo, cuánto ganaban mensual el 10% de la población que menos ingreso tiene o cuánto es el máximo de ingreso entre una clase a otra.
+
+```{r}
+# recordemos que atrás, antes de crear la curva de Lorenz, se había creado el vector 'ingreso' que justo era el ingreso ordenado de menor a mayor
+quantile(ingreso,probs = c(0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1))
+```
+
+
+
+Los valores anteriores son los deciles de la distribución del ingreso, es decir, los puntos de corte. La lógica está en que, por ejemplo, el 10% de la población más pobre, o sea, el decil 1, tenían ingresos menores o iguales a 7,500 pesos chilenos. 
+
+
+```{r}
+# creación de variable categórica de clases sociales
+datos<-datos%>%
+  mutate(clase=case_when(income<=15000~"Clase baja",
+                         income>15000&income<=75000~"Clase media",
+                         income>75000~"Clase alta"))
+
+# conteo de observaciones por clase social resultante y frecuencia relativa
+kable(datos%>%
+  count(clase)%>%
+  arrange(n),
+  col.names = c("Clase","Número de personas"))
+```
+
+
+
+
+Con esta tabla, podemos dimensionar el número de personas de clase baja que había por cada uno de la clase alta. Así, una razón aritmética poblacional para conocer esto sería número de personas de clase baja dividido entre el número de personas de clase alta. 
+
+```{r}
+# razón entre pobres y ricos
+1422/164
+```
+
+
+Lo anterior, indica que, para 1988 en el contexto del Plebiscito Nacional en Chile, con base en el set de datos, había 8.6 personas pobres por cada 1 de clase alta.
+
+
+Véamos ahora sí la razón aritmética de Palma. Para esta, se requiere sumar el ingreso de los individuos al interior de las clases. Veamos primero gráficamente cómo se ve la distribución en porcentajes respecto a la suma del ingreso total.
+
+```{r}
+# suma del ingreso común
+ingreso_total<-sum(datos$income)
+print(suma_ingreso)
+```
+
+
+
+La suma total del ingreso, es decir, si todos los ingresos de los encuentados se sumasen, sería de 88'145,000 de pesos chilenos (CLP).
+
+
+```{r}
+# suma de ingresos por clase
+tabla_porcentaje<-datos%>%
+  group_by(clase)%>%
+  summarise(ingreso_clase=sum(income),
+            porcentaje=round((ingreso_clase/ingreso_total)*100,2))
+
+kable(tabla_porcentaje,
+      col.names = c(col.names = c("Clase","Suma del ingreso por clase","Porcentaje")))
+```
+
+
+```{r}
+# gráfico de torta Ratio de Palma
+porcentaje_recurso_chile<-tabla_porcentaje%>%
+  ggplot(aes(x = "", y = porcentaje, fill = clase)) +
+  geom_bar(stat = "identity", width = 1,color="black",alpha=0.7) +
+  coord_polar(theta = "y") +
+  theme_void() +
+  labs(title = "Porcentaje de ingreso por clase con relación a la riqueza total (Chile)",
+       fill = "Clase") +
+  geom_text(aes(label = paste0(porcentaje, "%")),
+            position = position_stack(vjust = 0.5))
+
+porcentaje_recurso_chile
+```
+
+
+
+Como ya se intuía con la visualización de la curva de Lorenz y el coeficiente de Gini derivado de esta, los ingresos más bajos eran los más frecuentes, indicando un alto grado de concentración y, por ende, de desigualdad. Ahora, con la creación de la variable de "clase" y la segmentación de esta con base en los puntos de corte según el cálculo de deciles. 
+
+Tenemos lo siguiente: 
+
+
+
+Clase baja: 40% más pobre.
+
+
+Clase media: 50% de la población con ingresos entre los puntos de corte de la clase baja y la clase alta.
+
+
+Clase alta: 10% más rico.
+
+Esta clasificación, aunque arbitraria en tanto se podría hacer cualquier otra relación entre cuantiles (porcentajes pobalcionales según ingreso), es la propuesta por mismo José Gabriel Palma, quien observó, comparando distribuciones entre países, que la clase media lograba capturar, en la mayoría de los casos, aproximadamente el 50% del producto social producido y que, por lo tanto, la variación de la desigualdad ocurría fundamentalmente en el otro 50% de los segmentos poblacionales; a saber, el 40% más pobre o clase baje y el 50% más rico o clase alta. Lejos de la pretenciosidad de afirmar total verdad respecto a esta elección de criterios para clasificar, resulta funcional y relativamente corresponidida con la realidad, al menos la latinoamericana. Al fin y al cabo, es un método más de los tanto existentes para operacionalizar y cuantificar la desigualdad.
+
+Ahora sí, Ratio de Palma, que se compone de dividir el ingreso del 10% más rico entre el ingreso del 40% más pobre. Esta razón se expresa así:
+
+
+Palma = Ingreso total del 10% más rico (Decil 10) / Ingreso total del 40% más pobre (Decil 1 al 4)
+
+```{r}
+# ratio de palma con los ingresos en CLP
+26200000/15625000
+
+# ratio de palma con los porcentajes
+29.72/17.73
+```
+
+
+Ambos resultados dan el mismo resultado ≈ 1.68, lo cual quiere decir que el 10% más rico de Chile para 1988 lograba capturar 1.68 veces más riqueza que el 40% más pobre. 
+
+No obstante, lo más interesante acá —o al menos hasta lo que hasta el momento he aprendido en mi indagación que apenas está empezando— es lo relacionado a las 'áreas de Palma'. Si partimos de una situación de ideal de distribución de 23%-54%-23%, como en países como Dinamarca, donde el 40% con menores ingresos captura alrededor del 23% de la riqueza, la clase media el 54% y el 10% más rico el otro 23% del producto social, podemos calcular la diferencia entre porcentajes con el caso concreto y determinar las áreas de Palma que indican la "ganacia extraordinaria" de unas clases sobre las otras. 
+
+
+```{r}
+# creación del caso ideal para luego unirlo con la base de los porcentajes
+ideal_distribucion<-data.frame(clase=c("Clase alta","Clase media","Clase baja"),
+           porcentaje_ideal=c(23,54,23))
+
+# así quedó
+print(ideal_distribucion)%>%
+  kable(col.names = c("Clase","Porcentaje"))
+```
+
+
+
+
+Ahora, unimos los data frames para poder sacar la diferencia:
+
+```{r}
+# unir data frames
+areas_palma<-merge(tabla_porcentaje,ideal_distribucion,by="clase")
+
+print(areas_palma)
+```
+
+
+
+Resta para hallar las áreas de Palma:
+
+```{r}
+areas_palma<-areas_palma%>%
+  mutate(excedente_deficit=porcentaje-porcentaje_ideal)
+
+print(areas_palma)
+```
+
+
+
+
+
+
+La varible última llamada 'excedente_deficit' es la diferencia, como se dijo anteriormente, entre el caso de Chile para 1988 y un caso ideal de distribución 23%-54%-23%, cuyo resultado corresponde al porcentaje de excende o déficit distributivo, según el caso. Así, el 10% más rico obtuvo por sobre el 40% más pobre un excendete de 5.27% del total del ingreso. De igual manera, podemos ver la relación con las clases medias que en teoría concentran el 50% del ingreso pero que acá presentan un défit de 1.45% que terminó capturado por las clase altas. Decimos que es por sobre estas debido a que la suma del déficit de ambas clases, baja y media, es igual al excedente de la alta.
+
+Esto, sin embargo, no se refiere necesariamente a un "arrebato" de los recursos por vías coactivas, sino a múltiples transferencias implícitas de participación en el ingreso, lo cual a su vez da cuenta de una economía política en la cual las clases cooperan para la distribución de este o disputan la apropiación del producto social común. Esta distribución se encuentra prederterminada y depende de diversos factores que van desde las relaciones contractuales, los balances contables, el pago de impuestos, los subsidios y subvenciones, pasando por los costos del hogar y los serivicios públicos, y hasta los esquemas de redristribución y cesión. Por esto mismo, termina siendo una cuestión compleja de análizar, precisamente por el origen de los datos y la medición misma de la realidad de las cosas.  
+
+
+
+
+```{r}
+# gráfico torta de distribución ideal para contrastar
+porcentaje_recurso_ideal<-areas_palma%>%
+  ggplot(aes(x="",y=porcentaje_ideal,fill=clase))+
+  geom_bar(stat="identity",width = 1,color="black",alpha=0.7)+
+  coord_polar(theta="y")+
+  theme_void()+
+  labs(title = "Porcentaje de ingreso por clase (caso ideal de resdistribución)",
+       fill = "Clase") +
+  geom_text(aes(label = paste0(porcentaje_ideal, "%")),
+            position = position_stack(vjust = 0.5))
+
+# contraste de g´raficos: Chile vs caso hipotético ideal
+porcentaje_recurso_chile/porcentaje_recurso_ideal
+```
+
+
+
+
+Podemos observar la diferencia en la participación a partir del contraste. Por supuesto que, dependiendo del referente a comparar, las conclusiones y la explicación cambia. Sin embargo, para latinoamérica y en general el Sur Global, el porcentaje de participación en los recursos comunes sigue una lógica similar.
+
+
+#### Consideraciones finales
+
+
+Observamos a lo largo del informe que, para 1988, Chile tenía una alta desigualdad como correlato de la concentración del ingreso, lo cual calculamos estimando la curva de Lorenz, el coeficiente de Gini y el ratio de Palma, lo cual sólo son cuantas métricas para la medición y aproximación a la desigualdad. Es decir, existen muchos más índices y enfoques para indagar en este tema.
+
+Como se dijo anteriormente, y lo cual también es un tema abordado en la guía cuantitativa en la cual me basé conceptualmente para escribir este informe de práctica de exploración y análisis de datos, la cuestión de los balances contables, es decir, de criterios de inclusión o exclusión de varibales para determinar el ingreso total, el gasto, el consumo y, en general, lo que es la riqueza o un recurso agregado, es sumamente complejo en términos metodológicos, ya que variaciones en estos rubros conllevan a interpretaciones diferentes y con impliciaciones al momento de realizar análisis; más aún, cuando se realizan desde entidades o centros de poder e influencia pública, cuyos efectos no se agotan en discusiones académicas sobre los métodos sino que se materializan bajo marcos político-ideológicos prácticos que afectan la realidad social concreta. 
+
+
+Espero el próximo análisis hacerlo sobre Colombia y explorar otros índices y métodos.
+
+
+
+#### Referencias
+
+Palma, J. G. (2014). Has the income share of the middle and upper-middle been stable around the ‘50/50 Rule’? The ‘Palma Ratio’ Revisited. Development and Change, 45(6), 1416–1448. https://doi.org/10.1111/dech.12133
+
+
+Ritchie, H. (2022, November 30). Palma ratio - S90/S40 ratio. Our World in Data. https://ourworldindata.org/grapher/palma-ratio-s90s40-ratio
+
+
+
+Sientifiko. (2023). “Desigualdad: una guía cuantitativa para matemáticos y no matemáticos”. https://sientifiko.medium.com/desigualdad-una-gu%C3%ADa-cuantitativa-para-matem%C3%A1ticos-y-no-matem%C3%A1ticos-parte-1-de-2-48b2af5cbd44
+
+
+
+
+
+
+
+
+
+
+
+
